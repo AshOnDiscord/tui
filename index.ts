@@ -66,8 +66,13 @@ const ESCAPE_CODES = {
   },
 };
 
+interface Option {
+  text: string;
+  color?: keyof typeof ESCAPE_CODES.FG;
+}
+
 // custom interactive cli select menu
-const options: { text: string; color?: keyof typeof ESCAPE_CODES.FG }[] = [
+const options: Option[] = [
   {
     text: "Small",
     color: "RED",
@@ -81,75 +86,111 @@ const options: { text: string; color?: keyof typeof ESCAPE_CODES.FG }[] = [
     color: "BLUE",
   },
 ];
-const selectorColor: keyof typeof ESCAPE_CODES.FG = "BLUE";
-const selectIndicator: string = "❯";
-const optionPadding = 2;
-const optionWrapping = true;
-
-const underline = (string: string): string => {
-  return `${ESCAPE_CODES.STYLES.UNDERLINE}${string}${ESCAPE_CODES.STYLES.UNDERLINE_OFF}`;
-};
-
-let selectedOption = 0;
-
-function printOptions() {
-  console.clear();
-  options.forEach((option, index) => {
-    if (index === selectedOption) {
-      if (selectorColor) {
-        process.stdout.write(ESCAPE_CODES.FG[selectorColor]);
-      }
-      process.stdout.write(selectIndicator);
-      process.stdout.write(ESCAPE_CODES.FG.DEFAULT);
-    } else {
-      process.stdout.write(" ".repeat(selectIndicator.length));
-    }
-    process.stdout.write(" ".repeat(optionPadding));
-    if (option.color) process.stdout.write(ESCAPE_CODES.FG[option.color]);
-    if (index === selectedOption) {
-      process.stdout.write(underline(option.text));
-    } else {
-      process.stdout.write(option.text);
-    }
-    process.stdout.write(ESCAPE_CODES.FG.DEFAULT + "\n");
-  });
-}
-
-printOptions();
 
 const cursorDownKeys = ["\u001B\u005B\u0042"];
 const cursorUpKeys = ["\u001B\u005B\u0041"];
 const enterKeys = ["\r"];
 
+interface Config {
+  selector: {
+    color: keyof typeof ESCAPE_CODES.FG;
+    indicator: string;
+  };
+  optionPadding: number;
+  defaultSelected: number;
+  selectWrapping: boolean;
+}
+
+const DEFAULT_CONFIG: Config = {
+  selector: {
+    color: "BLUE",
+    indicator: "❯",
+  },
+  optionPadding: 2,
+  defaultSelected: 0,
+  selectWrapping: true,
+};
+
+const config: Config = {
+  ...DEFAULT_CONFIG,
+};
+
+const underline = (string: string): string => {
+  return `${ESCAPE_CODES.STYLES.UNDERLINE}${string}${ESCAPE_CODES.STYLES.UNDERLINE_OFF}`;
+};
+
+// clear = false is typically used to initialize the menu
+function printOptions(config: Config, selected: Option, clear: boolean = true) {
+  // console.clear();
+  // instead of using console.clear(), move the cursor via ANSI escape codes and replace the content
+
+  if (clear) {
+    process.stdout.write(
+      `\x1b[${
+        config.selector.indicator.length +
+        config.optionPadding +
+        options[options.length - 1].text.length
+      }D`
+    );
+    process.stdout.write(`\x1b[${options.length}A`);
+  }
+  options.forEach((option, index) => {
+    if (option === selected) {
+      if (selected.color) {
+        process.stdout.write(ESCAPE_CODES.FG[selected.color]);
+      }
+      process.stdout.write(config.selector.indicator);
+      process.stdout.write(ESCAPE_CODES.FG.DEFAULT);
+    } else {
+      process.stdout.write(" ".repeat(config.selector.indicator.length));
+    }
+    process.stdout.write(" ".repeat(config.optionPadding));
+    if (option.color) process.stdout.write(ESCAPE_CODES.FG[option.color]);
+    if (option === selected) {
+      process.stdout.write(underline(option.text));
+    } else {
+      process.stdout.write(option.text);
+    }
+    process.stdout.write(ESCAPE_CODES.FG.DEFAULT);
+    process.stdout.write("\n");
+  });
+}
+
+let selected = options[config.defaultSelected];
+printOptions(config, selected, false);
+
 // detect key press
 process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdin.setEncoding("utf8");
+process.stdout.write("\x1b[?25l");
 process.stdin.on("data", function (keyRaw) {
   const key = keyRaw.toString();
   if (enterKeys.includes(key)) {
     // console.log(`You selected: ${options[selectedOption].text}`);
     process.stdout.write(`You selected: `);
-    if (options[selectedOption].color) {
-      process.stdout.write(ESCAPE_CODES.FG[options[selectedOption].color!]);
+    if (selected.color) {
+      process.stdout.write(ESCAPE_CODES.FG[selected.color!]);
     }
-    process.stdout.write(underline(options[selectedOption].text));
+    process.stdout.write(underline(selected.text));
     process.stdout.write(ESCAPE_CODES.FG.DEFAULT);
+    process.stdout.write("\x1b[?25h");
     process.exit();
   }
 
+  let selectedIndex = options.indexOf(selected);
   if (cursorUpKeys.includes(key)) {
-    selectedOption--;
+    selectedIndex--;
   } else if (cursorDownKeys.includes(key)) {
-    selectedOption++;
+    selectedIndex++;
   }
   if ([...cursorDownKeys, ...cursorUpKeys].includes(key)) {
-    if (!optionWrapping) {
-      selectedOption = Math.max(0, Math.min(selectedOption, options.length - 1));
-    }
-    if (optionWrapping) {
-      selectedOption = (selectedOption + options.length) % options.length;
+    if (!config.selectWrapping) {
+      selectedIndex = Math.max(0, Math.min(selectedIndex, options.length - 1));
+    } else {
+      selectedIndex = (selectedIndex + options.length) % options.length;
     }
   }
-  printOptions();
+  selected = options[selectedIndex];
+  printOptions(config, selected);
 });
