@@ -1,4 +1,4 @@
-import Selector, { type Option, type Config, SelectionStyle, type DoublePartial } from "./selector";
+import Selector, { type Option, type Config, SelectionStyle, type DeepPartial } from "./selector";
 
 enum Size {
   SMALL,
@@ -21,7 +21,7 @@ const options: Option[] = [
   },
 ];
 
-const config: DoublePartial<Config> = {
+const config: DeepPartial<Config> = {
   options: {
     selectedStyles: [
       SelectionStyle.Bold,

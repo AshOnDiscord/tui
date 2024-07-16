@@ -2,9 +2,12 @@ import { ESCAPE_CODES, underline } from "./consoleUtil";
 
 // type Optional<T, K extends keyof T> = Omit<T, K> & Partial<T>;
 
-// DeepPartial is a bitch and ends up giving me (type | unknown)[] which ts hates
-export type DoublePartial<T> = {
-  [K in keyof T]?: Partial<T[K]>;
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends (infer U)[]
+    ? DeepPartial<U>[]
+    : T[P] extends Readonly<infer U>[]
+    ? Readonly<DeepPartial<U>>[]
+    : DeepPartial<T[P]>;
 };
 
 const clamp = (min: number, max: number, value: number): number => {
@@ -35,12 +38,12 @@ export interface Config {
     selectedColor: keyof typeof ESCAPE_CODES.fg;
   };
   defaultSelected: number;
-  selectWrapping: boolean;
+  selectWrapping?: boolean;
   keyBindings: {
     down: string[];
     up: string[];
     select: string[];
-    exitKeys?: string[]; // We do not allow the user to remove the default exit keys, this is for extending the exit keys
+    exitKeys: string[]; // We do not allow the user to remove the default exit keys, this is for extending the exit keys
   };
 }
 
@@ -61,13 +64,14 @@ export default class Selector {
       down: ["\u001B\u005B\u0042"],
       up: ["\u001B\u005B\u0041"],
       select: ["\r"],
+      exitKeys: [],
     },
   };
   private selectedOption: Option;
   private resolvePromise?: (value: unknown) => void;
   private config: Config;
 
-  constructor(private options: Option[], config: DoublePartial<Config>) {
+  constructor(private options: Option[], config: DeepPartial<Config>) {
     this.config = {
       ...Selector.defaultConfig,
       ...config,
@@ -168,9 +172,6 @@ export default class Selector {
     selected: Option,
     clear: boolean = true
   ) {
-    // console.clear();
-    // instead of using console.clear(), move the cursor via ANSI escape codes and replace the content
-
     if (clear) {
       const optionLength = (
         options[options.length - 1].text ?? options[options.length - 1].value.toString()
