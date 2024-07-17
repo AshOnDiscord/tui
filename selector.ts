@@ -90,7 +90,11 @@ export default class Selector {
       },
     };
 
-    this.selectedOption = options[this.config.defaultSelected];
+    const selected = this.options[this.config.defaultSelected];
+    if (!selected) {
+      throw new Error("Default selected index is out of bounds");
+    }
+    this.selectedOption = selected;
   }
 
   #init() {
@@ -172,10 +176,9 @@ export default class Selector {
     selected: Option,
     clear: boolean = true
   ) {
-    if (clear) {
-      const optionLength = (
-        options[options.length - 1].text ?? options[options.length - 1].value.toString()
-      ).length;
+    const lastOption = options.at(-1);
+    if (clear && lastOption !== undefined) {
+      const optionLength = (lastOption.text ?? lastOption.value.toString()).length;
       const lineLength = config.selector.indicator.length + config.options.padding + optionLength;
       process.stdout.write(ESCAPE_CODES.cursor.left(lineLength));
       process.stdout.write(ESCAPE_CODES.cursor.up(options.length));
