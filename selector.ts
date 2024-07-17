@@ -151,7 +151,11 @@ export default class Selector {
       }
     }
 
-    this.selectedOption = this.options[selectedIndex];
+    const newSelection = this.options[selectedIndex];
+    if (newSelection === undefined) {
+      throw new Error("Selected index is out of bounds");
+    }
+    this.selectedOption = newSelection;
 
     if (selectedChanged) {
       this.printOptions();

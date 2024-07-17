@@ -2,122 +2,195 @@ import readline from "readline";
 
 import { ESCAPE_CODES } from "./consoleUtil";
 
-interface ValidatorResult {
+export interface ValidatorResult {
   valid: boolean;
   message?: string;
 }
-type Validator = (value: string) => ValidatorResult;
+export type Validator = (value: string) => ValidatorResult;
 
-interface Config {
+export interface Config {
   prompt: string;
   placeholder?: string;
   autocomplete?: boolean;
-  validate?: Validator;
+  autocompleteEndCursor?: boolean;
+  validator?: Validator;
   liveValidation?: boolean;
 }
 
-(() => {
-  const config: Config = {
-    prompt: "What is your email? ",
-    placeholder: "test@lol.com",
-    autocomplete: true,
-    validate: (value: string) => {
-      return {
-        valid: value.includes("@"),
-        message:
-          ESCAPE_CODES.fg.brightRed +
-          "Please enter a valid email address" +
-          ESCAPE_CODES.fg.default,
-      };
-    },
-    liveValidation: false,
-  };
+export default class TextInput {
+  private value: string = "";
+  private cursorOffset: number = 0;
+  private lastValidation: ValidatorResult | undefined;
+  private resolve: ((value: string) => void) | undefined;
 
-  let value = "";
-  let cursor = 0;
-  let lastSubmission: ValidatorResult | undefined;
+  constructor(private config: Config) {}
 
-  readline.emitKeypressEvents(process.stdin);
+  public async select() {
+    this.#init();
+    return await new Promise((resolve) => (this.resolve = resolve));
+  }
 
-  process.stdin.setRawMode(true);
-  process.stdin.on(
-    "keypress",
-    (
-      chunk: string,
-      key: { sequence: string; name: string; ctrl: boolean; meta: boolean; shift: boolean }
-    ) => {
-      // console.clear();
-      let valueCopy = value; // copy to detect changes (rerender)
+  #init() {
+    this.renderInput(this.value);
+    this.updateCursor(this.cursorOffset);
+    readline.emitKeypressEvents(process.stdin);
 
-      if (key.sequence === "\u0003") {
-        process.exit();
-      }
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("keypress", this.#handleInput.bind(this)); // bind ctx as stdin.on changes ctx
+  }
 
-      let left = cursor === 0 ? valueCopy : valueCopy.slice(0, -cursor);
-      let right = cursor === 0 ? "" : valueCopy.slice(-cursor);
+  #cleanUp(): void {
+    process.stdout.write(ESCAPE_CODES.cursor.down(1));
+    process.stdout.write(ESCAPE_CODES.cursor.start);
+    process.stdout.write(ESCAPE_CODES.clearLine); // delete validation message
 
-      if (key.name === "return") {
-        const validationResults = config.validate?.(value);
-        lastSubmission = validationResults;
-        if (validationResults?.valid) {
-          process.stdout.write("\n");
-          process.stdout.write(`You entered: ${value}`);
-          process.exit(); // exit, any return past this point is if the value is invalid
+    process.stdin.off("keypress", this.#handleInput.bind(this));
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+  }
+
+  #handleInput(
+    chunk: string,
+    key: { sequence: string; name: string; ctrl: boolean; meta: boolean; shift: boolean }
+  ): void {
+    if (key.sequence === "\u0003") {
+      this.#cleanUp();
+      process.exit();
+    }
+    let newValue = this.value;
+    let newCursorOffset = this.cursorOffset;
+
+    // grab left and right side of the cursor
+    let left = this.cursorOffset === 0 ? this.value : this.value.slice(0, -this.cursorOffset);
+    let right = this.cursorOffset === 0 ? "" : this.value.slice(-this.cursorOffset);
+
+    switch (key.name) {
+      case "return": {
+        if (!this.config.validator) {
+          this.#cleanUp();
+          return this.resolve?.(this.value);
         }
-      } else if (key.name === "tab") {
-        if (config.autocomplete) {
-          valueCopy = config.placeholder ?? "";
+        const validationResults = this.config.validator(this.value);
+        this.lastValidation = validationResults;
+        if (validationResults.valid) {
+          this.#cleanUp();
+          return this.resolve?.(this.value);
         }
-      } else if (key.name === "left") {
-        cursor = Math.min(valueCopy.length, cursor + 1);
-      } else if (key.name === "right") {
-        cursor = Math.max(0, cursor - 1);
-      } else if (key.name === "backspace") {
-        valueCopy = left.slice(0, -1) + right;
-      } else if (chunk?.length === 1) {
-        valueCopy = left + chunk + right;
+        break;
       }
-
-      // Update left and right
-      left = cursor === 0 ? valueCopy : valueCopy.slice(0, -cursor);
-      right = cursor === 0 ? "" : valueCopy.slice(-cursor);
-
-      // console.log(key, chunk);
-      // console.log(valueCopy, value, cursor);
-      if (valueCopy !== value) {
-        value = valueCopy;
-        // console.log("updated");
+      case "tab": {
+        if (!this.config.placeholder || !this.config.autocomplete) {
+          break;
+        }
+        if (this.value === "") {
+          newValue = this.config.placeholder;
+          newCursorOffset = this.value.length;
+          break;
+        }
+        break;
       }
-      process.stdout.write("\x1b[G");
-      process.stdout.write("\x1b[K");
-      process.stdout.write(config.prompt);
-      if (key.name === "return" && lastSubmission?.valid === false) {
-        process.stdout.write(ESCAPE_CODES.fg.brightRed);
+      case "backspace": {
+        if (newCursorOffset === newValue.length) {
+          break;
+        }
+        newValue = left.slice(0, -1) + right;
+        break;
       }
-      process.stdout.write(value);
-      process.stdout.write(ESCAPE_CODES.fg.default);
-      if (value === "") {
-        process.stdout.write(ESCAPE_CODES.styles.dim);
-        process.stdout.write(config.placeholder ?? "");
-        process.stdout.write(ESCAPE_CODES.styles.dimOff);
+      case "left": {
+        newCursorOffset = Math.min(newValue.length, newCursorOffset + 1);
+        break;
       }
-      process.stdout.write("\n");
-      process.stdout.write("\x1b[K");
-      if (config.liveValidation) {
-        const validationResults = config.validate?.(value);
-        process.stdout.write(validationResults?.valid ? "" : validationResults?.message ?? "");
-      } else if (lastSubmission?.valid === false) {
-        process.stdout.write(lastSubmission.message ?? "");
+      case "right": {
+        newCursorOffset = Math.max(0, newCursorOffset - 1);
+        break;
       }
-      process.stdout.write(ESCAPE_CODES.cursor.up(1));
-      process.stdout.write("\x1b[G");
-      process.stdout.write(ESCAPE_CODES.cursor.right(config.prompt.length + value.length));
-      process.stdout.write(cursor === 0 ? "" : ESCAPE_CODES.cursor.left(cursor));
-      if (config.autocomplete && value === "") {
-        process.stdout.write(ESCAPE_CODES.cursor.right(config.placeholder?.length ?? 0));
+      default: {
+        if (chunk.length === 1) {
+          newValue = left + chunk + right;
+        }
+        break;
       }
     }
-  );
-})();
 
-// red input, persist error msg
+    if (this.config.liveValidation && this.config.validator) {
+      this.lastValidation = this.config.validator(newValue);
+    }
+
+    let validationOccured = key.name === "return" || this.config.liveValidation;
+
+    if (newValue !== this.value || validationOccured) {
+      let invalid = validationOccured && this.lastValidation?.valid === false;
+
+      this.resetLine();
+      this.renderInput(newValue, invalid, this.lastValidation?.message);
+      this.value = newValue;
+
+      this.updateCursor(newCursorOffset);
+    }
+    if (newValue === this.value && newCursorOffset !== this.cursorOffset) {
+      this.updateCursor(newCursorOffset);
+    }
+  }
+
+  private resetLine() {
+    process.stdout.write(ESCAPE_CODES.cursor.down(1));
+    process.stdout.write(ESCAPE_CODES.cursor.start);
+    process.stdout.write(ESCAPE_CODES.clearLine); // delete validation message
+
+    process.stdout.write(ESCAPE_CODES.cursor.up(1));
+    process.stdout.write(ESCAPE_CODES.clearLine);
+    process.stdout.write(ESCAPE_CODES.cursor.start);
+  }
+
+  private renderInput(
+    value: string = "",
+    invalid: boolean = false,
+    validationError: string | undefined = undefined
+  ) {
+    // prompt
+    process.stdout.write(this.config.prompt);
+
+    // value
+    if (invalid) {
+      process.stdout.write(ESCAPE_CODES.fg.brightRed);
+    }
+    process.stdout.write(value);
+    process.stdout.write(ESCAPE_CODES.fg.default);
+
+    // placeholder
+    if (this.config.placeholder && value === "") {
+      process.stdout.write(ESCAPE_CODES.styles.dim);
+      process.stdout.write(this.config.placeholder);
+      process.stdout.write(ESCAPE_CODES.styles.dimOff);
+    }
+
+    process.stdout.write("\n");
+
+    // validation error
+    if (validationError) {
+      process.stdout.write(ESCAPE_CODES.fg.brightRed);
+      process.stdout.write(validationError);
+      process.stdout.write(ESCAPE_CODES.fg.default);
+    }
+  }
+
+  private updateCursor(newCursorOffset: number) {
+    process.stdout.write(ESCAPE_CODES.cursor.up(1));
+    process.stdout.write(ESCAPE_CODES.cursor.start);
+    const prevLineLength = this.config.prompt.length + this.value.length;
+    process.stdout.write(ESCAPE_CODES.cursor.right(prevLineLength)); // to the very right;
+    if (newCursorOffset !== 0) {
+      process.stdout.write(ESCAPE_CODES.cursor.left(newCursorOffset));
+    }
+    if (
+      this.config.placeholder &&
+      this.config.autocomplete &&
+      this.config.autocompleteEndCursor &&
+      this.value === ""
+    ) {
+      process.stdout.write(ESCAPE_CODES.cursor.right(this.config.placeholder.length));
+    }
+    this.cursorOffset = newCursorOffset;
+  }
+}

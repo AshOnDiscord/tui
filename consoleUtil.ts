@@ -1,6 +1,8 @@
 export const ESCAPE_CODES = {
   reset: "\x1b[0m",
 
+  clearLine: "\x1b[2K",
+
   styles: {
     bold: "\x1b[1m",
     boldOff: "\x1b[22m",
@@ -75,6 +77,8 @@ export const ESCAPE_CODES = {
 
     left: (count: number = 1) => `\x1b[${count}D`,
     right: (count: number = 1) => `\x1b[${count}C`,
+
+    start: "\x1b[G",
   },
 };
 
