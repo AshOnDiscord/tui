@@ -1,4 +1,4 @@
-import { ESCAPE_CODES, underline } from "./consoleUtil";
+import { ESCAPE_CODES } from "./consoleUtil";
 
 // type Optional<T, K extends keyof T> = Omit<T, K> & Partial<T>;
 
